@@ -1,0 +1,230 @@
+// this #include statement was automatically added by the Particle IDE.
+#include <Adafruit_SSD1306.h>
+
+// use I2C with OLED RESET pin D0
+#define OLED_RESET D0
+Adafruit_SSD1306 oled(OLED_RESET);
+
+// defining the following pins as integers
+int button = D2;
+int WHT_LED = D3;
+int RED_LED = A4;
+int BLU_LED = D5;
+int rollUp = D6;
+int rollDn = D7;
+
+// the floowing integers are for LED brightness and fade whilst in sleep mode
+int brightness = 0;
+int fadeAmount = 20;
+
+// defining 'connection' as a boolean for when device disconnected from the cloud
+bool connection;
+
+unsigned long sleepMillis;
+unsigned long sleepInterval = 12000;
+bool sleepMode = false;
+
+// defining the number of string messages and the indext start number
+int Index = 0;
+const int messageNum = 15;
+const int sendNum = 15;
+volatile int state = LOW;
+
+// the string messages
+String messageString[messageNum] = {"Hello", "Goodbye", "Leaving   now", "Where are you?", "On my way", "ETA 5", "ETA 15", "SOS", "Need help", "Bring     water", "Bring     supplies", "Yes", "No", "Maybe", "I don't   know"};
+String sendString[sendNum] = {"Hello", "Goodbye", "Leaving now", "Where are you?", "On my way", "ETA 5", "ETA 15", "SOS", "Need help", "Bring water", "Bring supplies", "Yes", "No", "Maybe", "I don't know"};
+
+// begin setup
+void setup() {
+
+  // setting the time zone for melbourne and AEST +10
+  Time.zone(+10);
+
+  // initialise with the I2C addr 0x3D (for the 128x64)
+  oled.begin(SSD1306_SWITCHCAPVCC, 0x3C);
+
+  // initialise serial monitor
+  Serial.begin(9600);
+
+  // sets pin as input
+  pinMode(button, INPUT_PULLUP);
+
+  // sets pins as output
+  pinMode(WHT_LED, OUTPUT);
+  pinMode(RED_LED, OUTPUT);
+  pinMode(BLU_LED, OUTPUT);
+
+  //turn off all LED's
+  digitalWrite(WHT_LED, LOW);
+  digitalWrite(RED_LED, LOW);
+  digitalWrite(BLU_LED, LOW);
+
+  // sets pins as output
+  pinMode(D6, OUTPUT);
+  pinMode(D7, OUTPUT);
+
+  // specifying a function to call from
+  attachInterrupt(rollUp, upTrigger, RISING);
+  attachInterrupt(rollDn, dnTrigger, RISING);
+}
+
+// begin loop
+void loop() {
+
+  // check the status of the device connection
+  if (Particle.connected()) connection = true;
+  else connection = false;
+
+  // if the device is connected run this loop
+  if (connection) {
+
+    // if the device IS NOT in sleep mode run this loop
+    if (sleepMode == false) {
+      digitalWrite(RED_LED, LOW);
+
+      oled.clearDisplay();                     // clears all text on the sceen
+      delay(200);                              // delay for 200ms
+      oled.setTextSize(2);                     // set oled text size to 2pt (16 pixels high)
+      oled.setTextColor(WHITE);                // set oled text colour white
+      oled.setCursor(0, 32);                   // set oled text cursor to pixel 0,0
+      oled.print(messageString[Index / 2]);    // print the message string number
+      oled.setTextColor(BLACK, WHITE);
+
+      oled.setTextSize(1);
+      oled.setCursor(0, 0);
+      oled.print("  ECHO IS CONNECTED  ");
+      oled.setTextColor(WHITE, BLACK);
+
+      oled.setCursor(0, 16);
+      oled.print("Press to Send");
+
+      oled.setTextColor(BLACK, WHITE);   // 'inverted' text
+      oled.display();
+
+      //  if the button is pressed publish "send message" for IFTTT, contents of the message will be the message string on display
+      if (digitalRead(button) == 0) {
+        Particle.publish("sendMessage", sendString[Index / 2]);
+
+        // print the following actions on the screen
+        oled.clearDisplay();
+        oled.setTextSize(1);
+        oled.setCursor(0, 0);
+        oled.print("  ECHO IS CONNECTED  ");
+        oled.setTextColor(WHITE, BLACK);
+
+        // set oled text size to 2pt (16 pixels high)
+        oled.setTextSize(2);
+        oled.setTextColor(WHITE);
+        oled.setCursor(5, 25);
+
+        // print "sending" on screen
+        oled.print("Sending");
+        oled.display();
+
+        // flash the blue LED's twice while sending
+        digitalWrite(WHT_LED, LOW);
+        digitalWrite(BLU_LED, HIGH);
+        delay(500);
+        digitalWrite(BLU_LED, LOW);
+        delay(500);
+        oled.setCursor(89, 25);
+        oled.print(".");
+        oled.display();
+        digitalWrite(BLU_LED, HIGH);
+        delay(500);
+        digitalWrite(BLU_LED, LOW);
+        delay(500);
+        oled.setCursor(99, 25);
+        oled.print(".");
+        oled.display();
+        digitalWrite(BLU_LED, HIGH);
+        delay(500);
+        digitalWrite(BLU_LED, LOW);
+        delay(500);
+        oled.setCursor(109, 25);
+        oled.print(".");
+        oled.display();
+        digitalWrite(BLU_LED, HIGH);
+        delay(1000);
+
+        // print "sent" on screen
+        oled.clearDisplay();
+        oled.setCursor(0, 25);
+        oled.setTextColor(BLACK, WHITE);
+        oled.print("   Sent   ");
+        oled.display();
+
+        // keep the blue LED on for 3000ms and then return to the white LED
+        delay(3000);
+        digitalWrite(BLU_LED, LOW);
+        digitalWrite(WHT_LED, HIGH);
+
+      }
+
+      // keep the white LED on at all other times
+      digitalWrite(WHT_LED, 1);
+
+      digitalWrite(rollUp, state);
+      digitalWrite(rollDn, state);
+
+      // if the device IS in sleep mode run this loop
+    } else {
+
+      // turn off the white LED
+      digitalWrite(WHT_LED, 0);
+
+      // if device is in sleep mode and connected to the cloud run this
+      if (connection == true) {
+
+        // print time on screen when in sleep mode
+        oled.clearDisplay();
+        oled.setCursor(48, 28);
+        oled.setTextColor(WHITE);
+        oled.print(Time.hourFormat12()); oled.print(":"); oled.print(Time.minute());
+        oled.display();
+
+        // fade RED_LED to emulate a visual breathing
+        analogWrite(RED_LED, brightness);
+        brightness = brightness + fadeAmount;
+        if (brightness <= 0 || brightness >= 255) {
+          fadeAmount = -fadeAmount;
+        }
+        delay(30);
+      }
+    }
+
+    // if the device has been idle for longer than the sleep interval, put device into sleep mode
+    if (millis() - sleepMillis > sleepInterval) {
+      sleepMode = true;
+    }
+
+    // run this loop if photon is disconnected from internet
+  } else {
+    digitalWrite(WHT_LED, LOW);
+    digitalWrite(RED_LED, HIGH);
+    oled.clearDisplay();
+    oled.setTextSize(1);
+    oled.setCursor(2, 56);
+    oled.print("Device is Disconected");
+    oled.setTextColor(WHITE, BLACK);
+    oled.display();
+  }
+}
+
+// print in serial monitor "UP" if up is triggered move message string index forward
+void upTrigger() {
+  sleepMillis = millis();
+  sleepMode = false;
+  Serial.println("UP");
+  Index++;
+  if (Index / 2 >= messageNum) Index = 0;
+}
+
+// print in serial monitor "DOWN" if down is triggered move message string index backward is index is less than 0 move to end of string loop
+void dnTrigger() {
+  sleepMillis = millis();
+  sleepMode = false;
+  Serial.println("DOWN");
+  Index--;
+  if (Index < 0) Index = messageNum * 2 - 2;
+}
